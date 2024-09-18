@@ -1,0 +1,28 @@
+# Override: use PostgreSQL instead of SQLite.
+#   DL_POSTGRES_PASSWORD=... docker compose -f docker/docker-compose.yml -f docker/docker-compose.postgres.yml up -d --build
+# NOTE: PostgreSQL support (driver, migrations) is implemented but was not exercised in the project's test runs.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: defectlens
+      POSTGRES_USER: defectlens
+      POSTGRES_PASSWORD: ${DL_POSTGRES_PASSWORD:?set DL_POSTGRES_PASSWORD}
+    volumes:
+      - defectlens-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defectlens -d defectlens"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    environment:
+      DL_DATABASE_URL: postgresql+psycopg://defectlens:${DL_POSTGRES_PASSWORD}@db:5432/defectlens
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  defectlens-pg:

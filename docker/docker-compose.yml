@@ -1,0 +1,31 @@
+# DefectLens: Docker Compose (SQLite, CPU). From the repository root:
+#   cp .env.example .env            # set DL_ADMIN_PASSWORD (and DL_SECRET_KEY for anything beyond a local trial)
+#   docker compose -f docker/docker-compose.yml up -d --build
+#   docker compose -f docker/docker-compose.yml exec app defectlens bootstrap-demo   # optional demo models
+#   open http://localhost:8000
+# PostgreSQL:  add  -f docker/docker-compose.postgres.yml
+# NVIDIA GPU:  add  -f docker/docker-compose.gpu.yml  (requires the NVIDIA Container Toolkit)
+# Untested in the project sandbox (no Docker daemon available); see README.
+name: defectlens
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: defectlens:latest
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DL_VAR_DIR: /data
+    ports:
+      - "${DL_PORT:-8000}:8000"
+    volumes:
+      - defectlens-data:/data
+    restart: unless-stopped
+    # Inference + one training job need about 2 GB; 4 GB recommended (see README "Requirements").
+    mem_limit: ${DL_MEM_LIMIT:-4g}
+
+volumes:
+  defectlens-data:

@@ -1,0 +1,61 @@
+# Runtime data, datasets, model weights, reports (never commit - see docs/DATASETS.md, docs/MODELS.md)
+var/
+*.db
+*.db-journal
+*.sqlite3
+*.npz
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.tar
+*.zip
+!samples/**/*.zip
+
+# Secrets
+.env
+.env.*
+!.env.example
+secret.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+*.tsbuildinfo
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Playwright
+frontend/e2e/.auth/
+
+# Local caches and generated files
+build/
+coverage/
+.next/
+*.log
+CHANGELOG.md
+
+# Runtime data, downloaded datasets and trained models
+var/

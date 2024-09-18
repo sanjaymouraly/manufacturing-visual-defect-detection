@@ -1,0 +1,215 @@
+# DefectLens HTTP API
+
+Interactive documentation (OpenAPI/Swagger) is served by the running app at **`/api/docs`**, and the raw
+schema at `/api/openapi.json`. This page summarises authentication and conventions, then lists every route
+with its required role. The route table is generated from the code, so it cannot drift.
+
+## Authentication
+
+| Client | How |
+|---|---|
+| Browser (the web UI) | `POST /api/auth/login` with JSON `{"username","password"}` sets an `httpOnly`, `SameSite=Strict` session cookie. State-changing requests (POST/PUT/PATCH/DELETE) must also send `X-Requested-With: defectlens` (CSRF protection). |
+| Scripts, MES, line PCs | `POST /api/auth/token` with form fields `username`, `password` (OAuth2 password flow) returns `{"access_token", "token_type": "bearer"}`. Send `Authorization: Bearer <token>`. Bearer requests don't need the CSRF header. |
+
+Tokens expire after `DL_ACCESS_TOKEN_MINUTES`. Logout, password change, role change and deactivation revoke
+**all** of a user's tokens immediately (per-user `token_version`).
+
+Roles: **viewer** (read-only), **inspector** (inspect, batch, camera, review), **admin** (everything,
+including models, thresholds, users, providers and retention). Roles are enforced server-side on every route.
+
+```bash
+# Linux/macOS
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/token -d "username=admin&password=$DL_ADMIN_PASSWORD" \
+        | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+curl -s -H "Authorization: Bearer $TOKEN" -F file=@samples/demo-pcb/A_0162_defect-contamination.png \
+     -F product_key=demo-pcb http://localhost:8000/api/inspections
+```
+
+```powershell
+# Windows PowerShell
+$t = (Invoke-RestMethod -Method Post http://localhost:8000/api/auth/token -Body @{username="admin"; password=$env:DL_ADMIN_PASSWORD}).access_token
+curl.exe -s -H "Authorization: Bearer $t" -F "file=@samples/demo-pcb/A_0162_defect-contamination.png" -F product_key=demo-pcb http://localhost:8000/api/inspections
+```
+
+Response (abridged to the decision fields; actual output from the demo model, rounded here):
+
+```json
+{
+  "product_key": "demo-pcb", "model_name": "demo-pcb-patchcore",
+  "decision": "FAIL", "severity": "high",
+  "score": 2.1235, "fail_threshold": 1.3313, "pass_threshold": 1.2712,
+  "normalized_score": 1.5951, "calibrated_probability": 0.8573,
+  "reasons": ["Anomaly score 2.123 >= rejection threshold 1.331"],
+  "regions": [{"bbox": [149, 128, 50, 49], "area_px": 1860, "area_fraction": 0.028381,
+               "max_score": 2.12278, "mean_score": 1.6367, "approximate": true}],
+  "needs_review": false, "review_status": "none"
+}
+```
+
+`score` is the model's raw anomaly score (unitless and model-specific; **not** a probability).
+`normalized_score` is `score / fail_threshold` (≥ 1.0 means at or above the rejection threshold).
+`calibrated_probability` is a Platt-scaled estimate fitted on the small validation split. Treat it as a
+rough guide: it saturates near 0/1 for strong anomalies. `decision` is always one of `PASS`, `FAIL`, `REVIEW`. Anything that
+prevents a reliable inspection (decode failure, quality issues, out-of-distribution input, no active model)
+yields `REVIEW` with the reason. A region with `"approximate": true` marks the peak of the anomaly map
+because no area reached the segmentation threshold.
+
+## Conventions
+
+- **Errors**: JSON `{"detail": "..."}` (validation errors: FastAPI's `detail` list) with standard status
+  codes: 400 bad input, 401 not signed in, 403 role/CSRF, 404, 409 conflict (e.g. activating an unapproved
+  model, batch without an active model), 413 too large, 422 validation, 429 rate limited (with
+  `Retry-After`).
+- **Idempotency**: `POST /api/inspections` accepts an `Idempotency-Key` header. Re-uploading identical
+  bytes for the same product/model within `DL_DUPLICATE_WINDOW_HOURS` returns the existing inspection
+  (`duplicate_of`) unless `force=true`.
+- **Traceability fields** on inspections: `source`, `batch_code`, `camera_id`, `station`, `external_ref`
+  (MES unit/serial id).
+- **Long-running work** (batch inspection, training, evaluation, robustness, domain shift, retention)
+  returns `202` with a job. Poll `GET /api/jobs/{id}`, and cancel/retry via `POST /api/jobs/{id}/cancel|retry`.
+  Jobs survive restarts: on startup, `running` jobs whose heartbeat is stale (crashed worker) are re-queued, or
+  failed once they reach their attempt limit.
+- **Pagination**: `GET /api/inspections` takes `page`, `page_size` (≤ 200), `sort` and filters, and returns
+  `{"items", "total", "page"}`.
+- **Health**: `GET /api/health` (liveness, no DB) and `GET /api/health/ready` (DB reachable, data
+  directory actually writable, number of active models). `GET /api/metrics` gives Prometheus-style
+  counters. These three endpoints are unauthenticated and expose no sensitive data; restrict them at the proxy
+  if required.
+
+## Routes
+
+<!-- BEGIN GENERATED ROUTES -->
+
+_85 operations, generated by `scripts/gen_api_docs.py`. Do not edit by hand._
+
+### analytics & reports
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/dashboard` | any signed-in | dashboard |
+| `GET` | `/api/analytics` | any signed-in | analytics |
+| `POST` | `/api/reports` | admin, inspector | create report |
+| `GET` | `/api/reports/{name}` | any signed-in | download report |
+| `POST` | `/api/ai/period-summary` | any signed-in | period summary |
+| `POST` | `/api/ai/ask` | any signed-in | ask |
+
+### auth
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/login` | public | Browser login: sets an httpOnly, SameSite=Strict session cookie. |
+| `POST` | `/api/auth/token` | public | OAuth2 password flow for API / MES clients. Use as `Authorization: Bearer <token>`. |
+| `POST` | `/api/auth/logout` | any signed-in | Ends the session server-side: all tokens issued to this user so far become invalid. |
+| `GET` | `/api/auth/me` | any signed-in | me |
+| `POST` | `/api/auth/password` | any signed-in | change password |
+| `GET` | `/api/users` | admin | list users |
+| `POST` | `/api/users` | admin | create user |
+| `PATCH` | `/api/users/{user_id}` | admin | update user |
+
+### batch & jobs
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `POST` | `/api/batches` | admin, inspector | Upload images and/or ZIP archives; inspection runs in the background (poll `/api/jobs/{id}`). |
+| `GET` | `/api/batches/{job_id}/results` | any signed-in | batch results |
+| `GET` | `/api/jobs` | any signed-in | list jobs |
+| `GET` | `/api/jobs/{job_id}` | any signed-in | get job |
+| `POST` | `/api/jobs/{job_id}/cancel` | admin, inspector | cancel job |
+| `POST` | `/api/jobs/{job_id}/retry` | admin, inspector | retry job |
+
+### datasets
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/datasets` | any signed-in | list datasets |
+| `POST` | `/api/datasets/sync` | admin | sync |
+| `GET` | `/api/datasets/{dataset_id}` | any signed-in | get dataset |
+| `POST` | `/api/datasets/{dataset_id}/validate` | admin | validate |
+| `GET` | `/api/datasets/{dataset_id}/preview.jpg` | any signed-in | preview |
+| `GET` | `/api/datasets/{dataset_id}/samples` | any signed-in | samples |
+| `GET` | `/api/datasets/{dataset_id}/samples/{index}/{kind}` | any signed-in | sample file |
+| `POST` | `/api/datasets/import` | admin | Upload a ZIP with a custom dataset (MVTec-style or normal/ + anomaly/ folders, see docs/DATASETS.md). |
+| `POST` | `/api/datasets/feedback-version` | admin | build feedback version |
+
+### health
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/health` | public | health |
+| `GET` | `/api/health/ready` | public | ready |
+| `GET` | `/api/metrics` | public | metrics |
+
+### inspections
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `POST` | `/api/inspections` | admin, inspector | Inspect one image. Returns the persisted inspection (`duplicate=true` if an identical image was |
+| `GET` | `/api/inspections` | any signed-in | list inspections |
+| `GET` | `/api/inspections/export.csv` | any signed-in | export csv |
+| `GET` | `/api/inspections/facets` | any signed-in | facets |
+| `GET` | `/api/inspections/{inspection_id}` | any signed-in | get inspection |
+| `GET` | `/api/inspections/{inspection_id}/image/{kind}` | any signed-in | get image |
+| `GET` | `/api/inspections/{inspection_id}/report.pdf` | any signed-in | inspection report |
+| `POST` | `/api/inspections/{inspection_id}/summary` | any signed-in | inspection summary |
+| `GET` | `/api/inspections/{inspection_id}/audit` | any signed-in | inspection audit |
+
+### models
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/algorithms` | any signed-in | algorithms |
+| `GET` | `/api/models` | any signed-in | list models |
+| `GET` | `/api/models/{model_id}` | any signed-in | get model |
+| `POST` | `/api/models/{model_id}/status` | admin | set status |
+| `PUT` | `/api/models/{model_id}/thresholds` | admin | update thresholds |
+| `POST` | `/api/models/{model_id}/thresholds/reset` | admin | reset thresholds |
+| `POST` | `/api/products/{product_key}/activate` | admin | activate |
+| `POST` | `/api/products/{product_key}/rollback` | admin | rollback |
+| `GET` | `/api/products/{product_key}/activations` | any signed-in | activations |
+| `POST` | `/api/models/train` | admin | train |
+| `POST` | `/api/models/evaluate` | admin | evaluate |
+| `POST` | `/api/models/{model_id}/classifier` | admin | train classifier |
+| `POST` | `/api/models/{model_id}/export-onnx` | admin | export onnx |
+| `GET` | `/api/models/{model_id}/onnx` | admin | download onnx |
+| `GET` | `/api/models/{model_id}/card` | any signed-in | model card |
+| `GET` | `/api/evaluations` | any signed-in | list evaluations |
+| `GET` | `/api/evaluations/{eval_id}` | any signed-in | get evaluation |
+| `GET` | `/api/evaluations/{eval_id}/artifacts/{name}` | any signed-in | evaluation artifact |
+| `GET` | `/api/robustness/degradations` | any signed-in | list degradations |
+| `POST` | `/api/robustness` | admin | run robustness |
+| `POST` | `/api/domain-shift` | admin | run domain shift |
+| `GET` | `/api/robustness/preview` | admin | Apply one degradation to a held-out sample and run the model on clean vs degraded image. |
+
+### reviews
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/reviews/queue` | any signed-in | queue |
+| `POST` | `/api/reviews/{inspection_id}` | admin, inspector | submit review |
+| `GET` | `/api/reviews` | any signed-in | list reviews |
+| `GET` | `/api/feedback` | any signed-in | list feedback |
+| `POST` | `/api/feedback/{feedback_id}/decision` | admin | feedback decision |
+
+### settings
+
+| Method | Path | Role | Description |
+|---|---|---|---|
+| `GET` | `/api/settings` | any signed-in | read settings |
+| `PUT` | `/api/settings/{key}` | admin | write settings |
+| `GET` | `/api/products` | any signed-in | list products |
+| `POST` | `/api/products` | admin | create product |
+| `PATCH` | `/api/products/{key}` | admin | update product |
+| `POST` | `/api/cameras/{camera_id}/inspect` | admin, inspector | camera inspect |
+| `POST` | `/api/cameras/{camera_id}/test` | admin | camera test |
+| `GET` | `/api/providers` | admin | list providers |
+| `POST` | `/api/providers` | admin | create provider |
+| `PUT` | `/api/providers/{provider_id}` | admin | update provider |
+| `DELETE` | `/api/providers/{provider_id}` | admin | delete provider |
+| `POST` | `/api/providers/{provider_id}/test` | admin | test provider |
+| `GET` | `/api/providers/{provider_id}/models` | admin | provider models |
+| `POST` | `/api/retention/run` | admin | run retention |
+| `GET` | `/api/audit` | admin | audit log |
+| `GET` | `/api/audit/verify` | admin | audit verify |
+| `GET` | `/api/system` | any signed-in | system info |
+
+<!-- END GENERATED ROUTES -->

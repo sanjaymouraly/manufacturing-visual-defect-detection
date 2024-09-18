@@ -1,0 +1,17 @@
+# Override: NVIDIA GPU. Requires the NVIDIA driver plus the NVIDIA Container Toolkit on the host.
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d --build
+# Untested (no GPU was available in the project sandbox). The CPU path is the tested default.
+services:
+  app:
+    build:
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cu126
+    environment:
+      DL_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

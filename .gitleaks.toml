@@ -1,0 +1,11 @@
+# Gitleaks config: default rules plus a narrow allowlist for deliberate dummy values used in tests.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known fake test credentials (not real secrets)"
+regexTarget = "match"
+regexes = [
+  '''test-secret-key-0123456789abcdef0123456789abcdef''',
+  '''sk-test-SECRET-1234567890''',
+]

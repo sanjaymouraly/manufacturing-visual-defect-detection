@@ -1,0 +1,1 @@
+"""DefectLens web application (FastAPI)."""
